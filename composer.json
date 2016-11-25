@@ -1,0 +1,17 @@
+{
+	"name": "silverstripe/queuedJobsCSVExport",
+	"description": "Export Objects using QueuedJobs",
+	"type": "silverstripe-module",
+	"keywords": ["silverstripe", "jobs", "csv", "export"],
+	"license": "BSD-3-Clause",
+	"authors": [
+		{
+			"name": "Brett Tasker",
+			"email": "brett@silverstripe.com"
+		}
+	],
+	"require":
+	{
+		"silverstripe/queuedjobs": "~2.0"
+	}
+}
