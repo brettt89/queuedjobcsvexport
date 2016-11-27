@@ -121,6 +121,39 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
     }
 
     /**
+     * Run when an already setup job is being restarted.
+     */
+    public function prepareForRestart() {
+        parent::prepareForRestart();
+
+        $this->dataList = $this->getDataList();
+
+        if(empty($this->dataList)) {
+            $this->addMessage("No Datalist data", 'ERROR');
+            return;
+        }
+
+        $this->fields = $this->getFields($this->dataList->first());
+
+
+        if (empty($this->fields)) {
+            $this->addMessage("No fields defined", 'ERROR');
+            return;
+        }
+        
+        if (!$this->file = fopen($this->getFilePath(), 'a')){
+            $this->addMessage("Cannot open file: " . $this->getFilePath(), 'ERROR');
+            return;
+        }
+        
+        // Put header info
+        if (!fputcsv($this->file, $this->fields)) {
+            $this->addMessage("Unable to write data to: " . $this->getFilePath(), 'ERROR');
+            return;
+        }
+    }
+
+    /**
      * Process export to CSV
      *
      */
