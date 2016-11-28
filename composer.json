@@ -1,5 +1,5 @@
 {
-	"name": "silverstripe/queuedJobsCSVExport",
+	"name": "silverstripe/queuedjobs-csv-export",
 	"description": "Export Objects using QueuedJobs",
 	"type": "silverstripe-module",
 	"keywords": ["silverstripe", "jobs", "csv", "export"],
