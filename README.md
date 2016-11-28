@@ -15,7 +15,8 @@ The master branch of this module is currently aiming for SilverStripe 3.x compat
 
 ## Documentation
 
-The Queued Jobs CSV Export module provides a process for downloading large CSV files using the SilverStripe Queued Jobs module. By default this job exports the SiteTree DataList
+The Queued Jobs CSV Export module provides a process for downloading large CSV files using the SilverStripe Queued Jobs module. By default this job exports the SiteTree DataList.
+This was designed to allow custom long running CSV exports to be pushed out to Queuejobs and be actioned via CLI to avoid any timeouts.
 
 ## Quick Usage Overview
 
