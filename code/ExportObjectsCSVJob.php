@@ -9,7 +9,11 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
     protected $dataList;
     protected $fields;
 
+    /**
+     * Constructor
+     */
     public function __construct() {
+        $this->dataList = $this->getDataList();
     }
 
     /**
