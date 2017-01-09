@@ -29,7 +29,7 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
      * @return string
      */
     public function getSignature() {
-        return md5(get_class($this) . serialize($this->jobData) . serialize($this->dataList));
+        return md5(get_class($this) . serialize($this->dataList));
     }
     
     /**
@@ -55,8 +55,20 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
         return array_merge(array('ID' => 'ID'), $object->summaryFields());
     }
 
+    /**
+     * Returns file path for exporting data
+     * @return string
+     */
     protected function getFilePath() {
         return ASSETS_PATH . '/' . $this->getSignature() . '.csv';
+    }
+
+    /**
+     * Returns md5_file of exported data
+     * @return string
+     */
+    protected function getActualFileHash() {
+        return md5_file($this->getFilePath());
     }
 
     /**
@@ -65,6 +77,43 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
      */
     public function getNumberToProcess() {
         return 100;
+    }
+
+    /**
+     * Validate fields
+     * @return Boolean
+     */
+    private function validateFields() {
+        if (empty($this->fields)) {
+            $this->addMessage("No fields defined", 'ERROR');
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Validate file handler
+     * @return Boolean
+     */
+    private function validateFile($reset = false) {
+        if ($reset) {
+            @fclose($this->file);
+        }
+
+        if (!$this->file = fopen($this->getFilePath(), 'a')){
+            $this->addMessage("Cannot open file: " . $this->getFilePath(), 'ERROR');
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Store fields to be exported.
+     */
+    private function prepareFields() {
+        $firstRecord = $this->dataList->first();
+        $this->fields = $this->getFields($firstRecord);
     }
 
     /**
@@ -88,26 +137,18 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
             return;
         }
 
-
         $this->totalSteps = $this->dataList->count();
-        $this->fields = $this->getFields($this->dataList->first());
+        $this->prepareFields();
 
-
-        if (empty($this->fields)) {
-            $this->addMessage("No fields defined", 'ERROR');
-            return;
-        }
+        if (!$this->validateFields()) return;
+        if (!$this->validateFile()) return;
         
-        if (!$this->file = fopen($this->getFilePath(), 'a')){
-            $this->addMessage("Cannot open file: " . $this->getFilePath(), 'ERROR');
-            return;
-        }
-        
-        // Put header info
+                // Put header info
         if (!fputcsv($this->file, $this->fields)) {
             $this->addMessage("Unable to write data to: " . $this->getFilePath(), 'ERROR');
-            return;
+            return false;
         }
+
     }
 
     /**
@@ -130,6 +171,7 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
     public function prepareForRestart() {
         parent::prepareForRestart();
 
+        $this->messages = array();
         $this->dataList = $this->getDataList();
 
         if(empty($this->dataList)) {
@@ -137,24 +179,44 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
             return;
         }
 
-        $this->fields = $this->getFields($this->dataList->first());
+        $this->prepareFields();
 
-
-        if (empty($this->fields)) {
-            $this->addMessage("No fields defined", 'ERROR');
-            return;
-        }
+        if (!$this->validateFields()) return;
+        if (!$this->validateFile(true)) return;
         
-        if (!$this->file = fopen($this->getFilePath(), 'a')){
-            $this->addMessage("Cannot open file: " . $this->getFilePath(), 'ERROR');
-            return;
-        }
-        
-        // Put header info
-        if (!fputcsv($this->file, $this->fields)) {
+        // Put header info if restarted from beginning
+        if ($this->currentStep <= 0 && !fputcsv($this->file, $this->fields)) {
             $this->addMessage("Unable to write data to: " . $this->getFilePath(), 'ERROR');
             return;
         }
+    }
+
+    private function exportDataTo() {
+        if (!$object = $this->dataList->offsetGet($this->currentStep)){
+            $this->addMessage("No offset found: ". $this->currentStep, 'ERROR');
+            return false;
+        }
+
+        if (!$object->exists()) {
+            $this->addMessage("No Object found", 'ERROR');
+            return false;
+        }
+
+        // Get Export data
+        if (!$exportData = $this->getExportData($object)) {
+            $this->isComplete = true;
+            return false;
+        }
+        $object = null;
+
+        // Do export of data
+        if (!fputcsv($this->file, $exportData))
+        {
+            $this->addMessage("Unable to write data to: " . $this->getFilePath(), 'ERROR');
+            $this->isComplete = true;
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -164,59 +226,42 @@ class ExportObjectsCSVJob extends AbstractQueuedJob implements QueuedJob {
     public function process() {
         ini_set('max_execution_time', -1);
 
-        if (!empty($this->messages)) {
-            $this->isComplete = true;
-            return;
-        }
-
         // If dataList / fields has not been populated as part of setup then exit.
         if(empty($this->dataList) || empty($this->fields) || $this->totalSteps <= 0) {
             $this->addMessage("No data", 'ERROR');
             $this->isComplete = true;
             return;
         }
-
         $processCount = 0;
 
         // Export X number of objects in dataList
         // the database every time
-        while ($this->currentStep < $this->totalSteps) {
+        if ($this->currentStep == 0 || $this->StoredFileHash === $this->getActualFileHash()) {
+            while ($this->currentStep < $this->totalSteps) {
+                if (!$this->exportDataTo()) return;
 
-            if (!$object = $this->dataList->offsetGet($this->currentStep)){
-                $this->addMessage("No offset found: ". $this->currentStep, 'ERROR');
-                return false;
+                $this->currentStep++;
+                $processCount++;           
+
+                // Break loop after X number of objects are exported
+                if ($processCount >= $this->getNumberToProcess()) {
+                    break;
+                }
             }
 
-            if (!$object->exists()) {
-                $this->addMessage("No Object found", 'ERROR');
-                return false;
-            }
-
-            // Get Export data
-            if (!$exportData = $this->getExportData($object)) {
+            // If all records have been exported, finish the task.
+            if ($this->currentStep >= $this->totalSteps) {
                 $this->isComplete = true;
                 return;
             }
 
-            // Do export of data
-            if (!fputcsv($this->file, $exportData))
-            {
-                $this->addMessage("Unable to write data to: " . $this->getFilePath(), 'ERROR');
-                $this->isComplete = true;
-                return;
-            }
-
-            $this->currentStep++;
-            $processCount++;           
-
-            if ($processCount >= $this->getNumberToProcess()) {
-                break;
-            }
+            // Store current file hash
+            $this->StoredFileHash = $this->getActualFileHash();
+        } else {
+            // Wait 30 seconds to see if data is replicated between multiple servers correctly.
+            sleep(30);
+            $this->prepareForRestart();
         }
 
-        if ($this->currentStep >= $this->totalSteps) {
-            $this->isComplete = true;
-            return;
-        }
     }
 }
